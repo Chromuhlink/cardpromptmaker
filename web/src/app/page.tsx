@@ -239,27 +239,19 @@ export default function Home() {
       imageUrl = await uploadImageAndGetUrl(blob);
     }
 
-    // Compose share URLs; Facebook will ignore text in some contexts, but we'll pass it via 'quote'
+    // Use a dedicated share page with OG tags for reliable previews
+    const base = window.location.origin;
+    const sharePage = imageUrl ? `${base}/share/${encodeURIComponent(imageUrl)}` : "https://app.daisy.so/create";
     const encodedText = encodeURIComponent(shareText);
-    const encodedUrl = encodeURIComponent("https://app.daisy.so/create");
-    const encodedImage = imageUrl ? encodeURIComponent(imageUrl) : "";
+    const encodedUrl = encodeURIComponent(sharePage);
 
     let url = "";
     if (platform === "x") {
-      // X: include text, link, and try to include image URL
-      const parts = [`text=${encodedText}`, `url=${encodedUrl}`];
-      if (encodedImage) parts.push(`url=${encodedImage}`);
-      url = `https://x.com/intent/tweet?${parts.join("&")}`;
+      url = `https://x.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
     } else if (platform === "facebook") {
-      // Facebook sharer: primary 'u' is the landing link; include image/link via params (FB may scrape the landing page)
-      const params = [`u=${encodedUrl}`];
-      if (encodedText) params.push(`quote=${encodedText}`);
-      if (encodedImage) params.push(`picture=${encodedImage}`);
-      url = `https://www.facebook.com/sharer/sharer.php?${params.join("&")}`;
+      url = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedText}`;
     } else {
-      // Telegram supports text+url; append image URL if present
-      const textParam = imageUrl ? `${shareText} ${imageUrl}` : shareText;
-      url = `https://t.me/share/url?url=${encodedUrl}&text=${encodeURIComponent(textParam)}`;
+      url = `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`;
     }
     window.open(url, "_blank", "noopener,noreferrer");
   }
