@@ -12,7 +12,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     openGraph: {
       title,
       description,
-      images: [{ url: imageUrl }],
+      images: [{ url: imageUrl, width: 1200, height: 630, alt: title }],
       type: "website",
     },
     twitter: {

@@ -230,7 +230,7 @@ export default function Home() {
   }
 
   async function shareImageWithText(platform: "x" | "facebook" | "telegram") {
-    const shareText = "Getting inspired using the prompt generator, try it out and use the prompts on";
+    const shareText = "Getting inspired using the prompt generator, try it out and use the prompts on daisy.so";
     const blob = await captureCardImageBlob();
 
     // Upload to get a public URL for consistent sharing
