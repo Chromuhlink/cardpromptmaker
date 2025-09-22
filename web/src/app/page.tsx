@@ -229,34 +229,7 @@ export default function Home() {
     }
   }
 
-  async function shareImageWithText(platform: "x" | "facebook" | "telegram") {
-    const shareText = "Getting inspired using the prompt generator, try it out and use the prompts on daisy.so";
-    const blob = await captureCardImageBlob();
-
-    // Upload to get a public URL for consistent sharing
-    let imageUrl: string | null = null;
-    if (blob) {
-      imageUrl = await uploadImageAndGetUrl(blob);
-    }
-
-    // Use a dedicated share page with OG tags for reliable previews
-    const base = window.location.origin;
-    const sharePage = imageUrl ? `${base}/share/${encodeURIComponent(imageUrl)}` : "https://app.daisy.so/create";
-    const encodedText = encodeURIComponent(shareText);
-    const encodedUrl = encodeURIComponent(sharePage);
-
-    let url = "";
-    if (platform === "x") {
-      url = `https://x.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`;
-    } else if (platform === "facebook") {
-      url = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedText}`;
-    } else {
-      // Telegram: include the link inside the text for better reliability
-      const fullText = encodeURIComponent(`${shareText} ${sharePage}`);
-      url = `https://t.me/share/url?text=${fullText}`;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
+  
 
   // Button label no longer used (auto reveal)
 
@@ -485,29 +458,7 @@ export default function Home() {
                 );
               })()}
 
-              <div className="mt-3 sm:mt-4 w-full max-w-xl mx-auto pb-2">
-                <div className="text-white/90 font-semibold mb-2 text-center">Quick share:</div>
-                <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                  <button
-                    onClick={() => shareImageWithText("x")}
-                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-black text-white border border-white/10 hover:opacity-90 text-sm sm:text-base"
-                  >
-                    X
-                  </button>
-                  <button
-                    onClick={() => shareImageWithText("facebook")}
-                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-[#1877F2] text-white border border-white/10 hover:opacity-90 text-sm sm:text-base"
-                  >
-                    Facebook
-                  </button>
-                  <button
-                    onClick={() => shareImageWithText("telegram")}
-                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-[#229ED9] text-white border border-white/10 hover:opacity-90 text-sm sm:text-base"
-                  >
-                    Telegram
-                  </button>
-                </div>
-              </div>
+              
             </motion.div>
           </motion.div>
         )}
