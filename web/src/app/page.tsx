@@ -99,8 +99,9 @@ export default function Home() {
   }, [viewport.w, viewport.h]);
   const gridWidthPx = useMemo(() => 3 * cardWidthPx + 2 * gapPx, [cardWidthPx]);
   const modalImageDisplaySize = useMemo(() => {
-    const maxHeightAllowed = Math.max(0, viewport.h * 0.75);
-    const maxWidthAllowed = Math.max(0, viewport.w * 0.95);
+    const isSmall = viewport.w <= 640;
+    const maxHeightAllowed = Math.max(0, viewport.h * (isSmall ? 0.46 : 0.5));
+    const maxWidthAllowed = Math.max(0, viewport.w * (isSmall ? 0.92 : 0.9));
     const widthLimitByViewport = Math.min(maxWidthAllowed, maxHeightAllowed * (2 / 3));
     if (modalNaturalSize.w > 0 && modalNaturalSize.h > 0) {
       const widthNoUpscale = Math.min(modalNaturalSize.w, modalNaturalSize.h * (2 / 3));
@@ -112,7 +113,13 @@ export default function Home() {
     return { w: fallbackW, h: Math.floor(fallbackW * 1.5) };
   }, [viewport.w, viewport.h, modalNaturalSize.w, modalNaturalSize.h]);
 
-  const canReveal = selected.length === 3 && gameState === "selecting";
+  // When exactly three cards are selected, automatically show the modal
+  useEffect(() => {
+    if (gameState === "selecting" && selected.length === 3) {
+      setGameState("revealed");
+      setShowModal(true);
+    }
+  }, [selected, gameState]);
 
   const cards = useMemo(() => Array.from({ length: 9 }, (_, i) => i), []);
 
@@ -125,30 +132,67 @@ export default function Home() {
     });
   }
 
-  function handleReveal() {
-    if (!canReveal) return;
-    // Generate exactly one image, one text, one feature in random positions
-    const newMap: Record<number, RevealedItem | null> = {};
-    const indices = shuffle(selected);
-    const typeOrder: ContentType[] = shuffle(["image", "text", "feature"]);
-    for (let k = 0; k < indices.length; k += 1) {
-      const idx = indices[k];
-      const t = typeOrder[k];
-      if (t === "image") {
-        const img = chooseRandom(images) ?? "/images/image%20693.png";
-        newMap[idx] = { type: "image", value: img };
-      } else if (t === "text") {
-        const prompt = chooseRandom(prompts) ?? "Imagine a world where...";
-        newMap[idx] = { type: "text", value: prompt };
-      } else {
-        const feature = chooseRandom(features) ?? "Offline-first sync";
-        newMap[idx] = { type: "feature", value: feature };
+  // While selecting, immediately assign random content to selected cards.
+  // Preserve prior assignments for still-selected cards, and aim for unique
+  // types across up to three selections. Uses a functional state update to
+  // avoid dependency loops and unnecessary renders.
+  useEffect(() => {
+    if (gameState !== "selecting") return;
+    setRevealedMap((prev) => {
+      const allTypes: ContentType[] = ["image", "text", "feature"];
+      const nextMap: Record<number, RevealedItem | null> = {};
+
+      // Keep previous assignments for still-selected indices
+      const assignedTypes = new Set<ContentType>();
+      for (const idx of selected) {
+        const existing = prev[idx];
+        if (existing) {
+          nextMap[idx] = existing;
+          assignedTypes.add(existing.type);
+        }
       }
-    }
-    setRevealedMap(newMap);
-    setGameState("revealed");
-    setShowModal(true);
-  }
+
+      // Determine remaining types to assign uniquely
+      const remainingTypes = allTypes.filter((t) => !assignedTypes.has(t));
+
+      function assignValueByType(t: ContentType): RevealedItem {
+        if (t === "image") {
+          const img = chooseRandom(images) ?? "/images/image%20693.png";
+          return { type: "image", value: img };
+        }
+        if (t === "text") {
+          const prompt = chooseRandom(prompts) ?? "Imagine a world where...";
+          return { type: "text", value: prompt };
+        }
+        const feature = chooseRandom(features) ?? "Offline-first sync";
+        return { type: "feature", value: feature };
+      }
+
+      // Assign for any selected index that doesn't yet have content
+      for (const idx of selected) {
+        if (nextMap[idx]) continue;
+        const t = remainingTypes.length > 0 ? remainingTypes.shift()! : shuffle(allTypes)[0];
+        nextMap[idx] = assignValueByType(t);
+      }
+
+      // If nothing changed, return previous to avoid re-render storm
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(nextMap);
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every((k) => {
+          const a = prev[Number(k)];
+          const b = nextMap[Number(k)];
+          return a?.type === b?.type && a?.value === b?.value;
+        })
+      ) {
+        return prev;
+      }
+      return nextMap;
+    });
+  }, [selected, images, prompts, features, gameState]);
+
+  // Reveal is now automatic after three selections
 
   function handleReset() {
     setSelected([]);
@@ -157,20 +201,75 @@ export default function Home() {
     setShowModal(false);
   }
 
-  function buttonLabel(): string {
-    if (gameState === "revealed") return "Again";
-    const remaining = 3 - selected.length;
-    if (remaining === 3) return "Choose 3";
-    if (remaining === 2) return "Choose 2";
-    if (remaining === 1) return "Choose 1";
-    return "Reveal";
+  async function captureCardImageBlob(): Promise<Blob | null> {
+    if (!modalCaptureRef.current) return null;
+    try {
+      const dataUrl = await toPng(modalCaptureRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#000000",
+      });
+      const res = await fetch(dataUrl);
+      return await res.blob();
+    } catch {
+      return null;
+    }
   }
 
-  const gradientBackBase = "bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-600";
-  const gradientBackSelected = "bg-gradient-to-br from-amber-500 via-orange-500 to-rose-500";
+  async function uploadImageAndGetUrl(blob: Blob): Promise<string | null> {
+    try {
+      const form = new FormData();
+      form.append("file", blob, "card.png");
+      const r = await fetch("/api/upload", { method: "POST", body: form });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return typeof data.url === "string" ? data.url : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function shareImageWithText(platform: "x" | "facebook" | "telegram") {
+    const shareText = "Getting inspired using the prompt generator, try it out and use the prompts on";
+    const blob = await captureCardImageBlob();
+
+    // Upload to get a public URL for consistent sharing
+    let imageUrl: string | null = null;
+    if (blob) {
+      imageUrl = await uploadImageAndGetUrl(blob);
+    }
+
+    // Compose share URLs; Facebook will ignore text in some contexts, but we'll pass it via 'quote'
+    const encodedText = encodeURIComponent(shareText);
+    const encodedUrl = encodeURIComponent("https://app.daisy.so/create");
+    const encodedImage = imageUrl ? encodeURIComponent(imageUrl) : "";
+
+    let url = "";
+    if (platform === "x") {
+      // X: include text, link, and try to include image URL
+      const parts = [`text=${encodedText}`, `url=${encodedUrl}`];
+      if (encodedImage) parts.push(`url=${encodedImage}`);
+      url = `https://x.com/intent/tweet?${parts.join("&")}`;
+    } else if (platform === "facebook") {
+      // Facebook sharer: primary 'u' is the landing link; include image/link via params (FB may scrape the landing page)
+      const params = [`u=${encodedUrl}`];
+      if (encodedText) params.push(`quote=${encodedText}`);
+      if (encodedImage) params.push(`picture=${encodedImage}`);
+      url = `https://www.facebook.com/sharer/sharer.php?${params.join("&")}`;
+    } else {
+      // Telegram supports text+url; append image URL if present
+      const textParam = imageUrl ? `${shareText} ${imageUrl}` : shareText;
+      url = `https://t.me/share/url?url=${encodedUrl}&text=${encodeURIComponent(textParam)}`;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  // Button label no longer used (auto reveal)
+
+  const gradientBackBase = "bg-[#2B7FFF]";
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6 pb-40">
       <div className="w-full max-w-6xl mx-auto flex flex-col items-center gap-4">
 
         <div className="grid" style={{ gap: `${gapPx}px`, gridTemplateColumns: `repeat(3, ${cardWidthPx}px)` }}>
@@ -187,8 +286,8 @@ export default function Home() {
                   "relative rounded-xl overflow-hidden border",
                   "border-black/10 dark:border-white/10",
                   "transition-shadow",
-                  "hover:ring-4 hover:ring-fuchsia-400 hover:shadow-[0_0_60px_rgba(232,121,249,0.5)]",
-                  isSelected && "ring-4 ring-fuchsia-400 shadow-[0_0_90px_rgba(232,121,249,0.9)]",
+                  "hover:ring-4 hover:ring-[#FF3B30] hover:shadow-[0_0_60px_rgba(255,59,48,0.5)]",
+                  isSelected && "ring-4 ring-[#FF3B30] shadow-[0_0_90px_rgba(255,59,48,0.9)]",
                 )}
                 style={{ width: cardWidthPx, height: Math.floor(cardWidthPx * 1.5) }}
                 disabled={gameState !== "selecting"}
@@ -196,21 +295,21 @@ export default function Home() {
                 <div className="absolute inset-0 [perspective:1000px]">
                   <motion.div
                     className="w-full h-full"
-                    animate={{ rotateY: revealed ? 180 : 0 }}
+                    animate={{ rotateY: (revealed || isSelected) ? 180 : 0 }}
                     transition={{ duration: 0.42 }}
                     style={{ transformStyle: "preserve-3d" }}
                   >
                     <div
                       className={clsx(
                         "absolute inset-0 backface-hidden",
-                        isSelected ? gradientBackSelected : gradientBackBase,
+                        gradientBackBase,
                         "flex items-center justify-center",
                       )}
                     >
                       <img
                         src="/logo/daisylogo.svg"
                         alt="Logo"
-                        className="w-1/2 max-w-[160px] opacity-90 drop-shadow"
+                        className="w-1/2 max-w-[160px] opacity-90 drop-shadow brightness-0 invert"
                       />
                     </div>
                     <div
@@ -220,6 +319,20 @@ export default function Home() {
                       )}
                     >
                       <AnimatePresence mode="wait" initial={false}>
+                        {!revealed && isSelected && (
+                          <motion.div
+                            key="selected"
+                            className="text-center text-xs sm:text-sm px-2"
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            transition={{ duration: 0.18 }}
+                          >
+                            <span className="inline-block rounded-full bg-[#FF3B30] text-white px-3 py-1 border border-white/20">
+                              Selected
+                            </span>
+                          </motion.div>
+                        )}
                         {revealed && revealed.type === "image" && (
                           <motion.img
                             key="img"
@@ -268,36 +381,15 @@ export default function Home() {
           })}
         </div>
 
-        {/* Bottom action: wide reveal/again button */}
-        {(gameState === "selecting" || (gameState === "revealed" && !showModal)) && (
+        {/* Bottom action: only show Again when revealed and modal closed */}
+        {gameState === "revealed" && !showModal && (
           <div style={{ width: gridWidthPx }} className="mt-2">
-            {gameState === "selecting" ? (
-              <button
-                disabled={!canReveal}
-                onClick={handleReveal}
-                className={clsx(
-                  "w-full py-4 rounded-2xl text-lg font-medium shadow-lg active:translate-y-[1px]",
-                  canReveal
-                    ? "bg-fuchsia-600 text-white hover:bg-fuchsia-500 shadow-fuchsia-500/30"
-                    : "bg-fuchsia-600/50 text-white/70 cursor-not-allowed",
-                )}
-              >
-                {canReveal ? "Reveal" : (() => {
-                  const remaining = 3 - selected.length;
-                  if (remaining === 3) return "Choose 3";
-                  if (remaining === 2) return "Choose 2";
-                  if (remaining === 1) return "Choose 1";
-                  return "Reveal";
-                })()}
-              </button>
-            ) : (
-              <button
-                onClick={handleReset}
-                className="w-full py-4 rounded-2xl text-lg font-medium bg-neutral-800 text-white dark:bg-neutral-200 dark:text-black hover:opacity-90 shadow-lg shadow-black/30 active:translate-y-[1px]"
-              >
-                Again
-              </button>
-            )}
+            <button
+              onClick={handleReset}
+              className="w-full py-4 rounded-2xl text-lg font-medium bg-[#2B7FFF] text-white hover:opacity-90 shadow-lg shadow-[0_0_40px_rgba(43,127,255,0.3)] active:translate-y-[1px]"
+            >
+              Again
+            </button>
           </div>
         )}
       </div>
@@ -312,7 +404,7 @@ export default function Home() {
           >
             <div className="absolute inset-0 bg-black/60" onClick={() => setShowModal(false)} />
             <motion.div
-              className="relative z-10 w-[95%] max-w-3xl rounded-xl bg-black/80 dark:bg-black/80 border border-white/10 p-2 sm:p-3 shadow-xl"
+              className="relative z-10 w-[95%] max-w-3xl max-h-[92vh] overflow-hidden rounded-xl bg-black/80 dark:bg-black/80 border border-white/10 p-2 sm:p-3 shadow-xl"
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
@@ -324,7 +416,10 @@ export default function Home() {
                 const prompt = items.find((x) => x.type === "text");
                 const feature = items.find((x) => x.type === "feature");
                 return (
-                  <div ref={modalCaptureRef} className="w-full flex flex-col items-center">
+                  <div
+                    ref={modalCaptureRef}
+                    className="w-full flex flex-col items-center rounded-2xl border border-white/30 md:border-[3px] bg-black/20 p-2 sm:p-4"
+                  >
                     <div
                       className="relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
                       style={{ width: modalImageDisplaySize.w, height: modalImageDisplaySize.h, maxWidth: "100%" }}
@@ -344,51 +439,80 @@ export default function Home() {
                       )}
                     </div>
 
-                    {feature && (
-                      <div className="mt-3 text-center">
-                        <span className="inline-block rounded-full bg-fuchsia-600 text-white px-4 py-2 text-sm sm:text-base md:text-lg border border-white/10">
+                    <div className="mt-2 sm:mt-3 w-full flex flex-col items-center gap-2 sm:gap-2.5">
+                      {feature && (
+                        <a
+                          href="https://app.daisy.so/create"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block rounded-full bg-[#2B7FFF] text-white px-4 py-2 text-sm sm:text-base md:text-lg border border-white/10 shadow-md hover:opacity-90"
+                        >
                           {feature.value}
-                        </span>
-                      </div>
-                    )}
+                        </a>
+                      )}
 
-                    {prompt && (
-                      <div className="mt-3 max-w-2xl text-center text-lg sm:text-xl md:text-2xl leading-snug text-white/95">
-                        {prompt.value}
-                      </div>
-                    )}
+                      {prompt && (
+                        <div className="w-full max-w-xl text-center text-base sm:text-xl md:text-2xl leading-snug text-white/95 border border-white/30 md:border-[3px] bg-white/10/50 rounded-xl px-3 py-2 sm:px-4 sm:py-3">
+                          {prompt.value}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-3 sm:mt-3 w-full flex flex-row items-center justify-center gap-2 sm:gap-3">
+                      <button
+                        onClick={async () => {
+                          if (!modalCaptureRef.current) return;
+                          try {
+                            const dataUrl = await toPng(modalCaptureRef.current, {
+                              cacheBust: true,
+                              pixelRatio: 2,
+                              backgroundColor: "#000000",
+                            });
+                            const link = document.createElement("a");
+                            link.download = "card-reveal.png";
+                            link.href = dataUrl;
+                            link.click();
+                          } catch (e) {
+                            // noop
+                          }
+                        }}
+                        className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl text-sm sm:text-base font-medium bg-[#2B7FFF] text-white hover:opacity-90 shadow-lg shadow-[0_0_40px_rgba(43,127,255,0.3)] active:translate-y-[1px]"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={handleReset}
+                        className="px-4 sm:px-6 py-2.5 sm:py-3 rounded-xl text-sm sm:text-base font-medium bg-neutral-600 text-white hover:bg-neutral-500 shadow-lg shadow-black/30 active:translate-y-[1px]"
+                      >
+                        Again
+                      </button>
+                    </div>
                   </div>
                 );
               })()}
 
-              <div className="mt-4 sm:mt-5 flex flex-col items-center gap-3">
-                <button
-                  onClick={async () => {
-                    if (!modalCaptureRef.current) return;
-                    try {
-                      const dataUrl = await toPng(modalCaptureRef.current, {
-                        cacheBust: true,
-                        pixelRatio: 2,
-                        backgroundColor: "#000000",
-                      });
-                      const link = document.createElement("a");
-                      link.download = "card-reveal.png";
-                      link.href = dataUrl;
-                      link.click();
-                    } catch (e) {
-                      // noop
-                    }
-                  }}
-                  className="px-6 py-3 rounded-lg text-base font-medium bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg shadow-emerald-500/30 active:translate-y-[1px]"
-                >
-                  Save Image
-                </button>
-                <button
-                  onClick={handleReset}
-                  className="px-6 py-4 rounded-xl text-base font-medium bg-neutral-100/10 text-white hover:bg-neutral-100/20 border border-white/20 shadow-lg shadow-black/30 active:translate-y-[1px]"
-                >
-                  Again
-                </button>
+              <div className="mt-3 sm:mt-4 w-full max-w-xl mx-auto pb-2">
+                <div className="text-white/90 font-semibold mb-2 text-center">Quick share:</div>
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  <button
+                    onClick={() => shareImageWithText("x")}
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-black text-white border border-white/10 hover:opacity-90 text-sm sm:text-base"
+                  >
+                    X
+                  </button>
+                  <button
+                    onClick={() => shareImageWithText("facebook")}
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-[#1877F2] text-white border border-white/10 hover:opacity-90 text-sm sm:text-base"
+                  >
+                    Facebook
+                  </button>
+                  <button
+                    onClick={() => shareImageWithText("telegram")}
+                    className="w-full px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl bg-[#229ED9] text-white border border-white/10 hover:opacity-90 text-sm sm:text-base"
+                  >
+                    Telegram
+                  </button>
+                </div>
               </div>
             </motion.div>
           </motion.div>

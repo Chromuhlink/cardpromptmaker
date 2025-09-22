@@ -27,7 +27,26 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <video
+          className="fixed inset-0 w-full h-full object-cover -z-10 opacity-75 pointer-events-none"
+          autoPlay
+          loop
+          muted
+          playsInline
+          src="/video/HKk6d7CxCUOCEyRztfV2912558.mp4"
+        />
         {children}
+        <footer className="fixed bottom-6 left-0 right-0 w-full text-center p-0 text-black font-bold text-[20px]">
+          create something magical on{" "}
+          <a
+            href="https://daisy.so"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline text-black font-bold"
+          >
+            daisy.so
+          </a>
+        </footer>
       </body>
     </html>
   );
