@@ -251,7 +251,9 @@ export default function Home() {
     } else if (platform === "facebook") {
       url = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedText}`;
     } else {
-      url = `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`;
+      // Telegram: include the link inside the text for better reliability
+      const fullText = encodeURIComponent(`${shareText} ${sharePage}`);
+      url = `https://t.me/share/url?text=${fullText}`;
     }
     window.open(url, "_blank", "noopener,noreferrer");
   }
