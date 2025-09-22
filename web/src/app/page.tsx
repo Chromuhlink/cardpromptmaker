@@ -383,7 +383,7 @@ export default function Home() {
 
         {/* Bottom action: only show Again when revealed and modal closed */}
         {gameState === "revealed" && !showModal && (
-          <div style={{ width: gridWidthPx }} className="mt-2">
+          <div style={{ width: gridWidthPx }} className="mt-2 mb-24 sm:mb-28">
             <button
               onClick={handleReset}
               className="w-full py-4 rounded-2xl text-lg font-medium bg-[#2B7FFF] text-white hover:opacity-90 shadow-lg shadow-[0_0_40px_rgba(43,127,255,0.3)] active:translate-y-[1px]"
