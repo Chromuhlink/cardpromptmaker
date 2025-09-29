@@ -1,19 +1,21 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 
-async function readLinesFromPublicFile(relativePath: string): Promise<string[]> {
-  const absolutePath = path.join(process.cwd(), "public", relativePath);
-  const raw = await fs.readFile(absolutePath, "utf8");
-  return raw
-    .split(/\r?\n/g)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !l.startsWith("#"));
+export const runtime = "edge";
+
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, { cache: "force-cache" });
+  if (!res.ok) throw new Error(`Failed to fetch ${url}`);
+  return await res.text();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const lines = await readLinesFromPublicFile(path.join("data", "prompts.txt"));
+    const base = new URL("/data/prompts.txt", request.url).toString();
+    const raw = await fetchText(base);
+    const lines = raw
+      .split(/\r?\n/g)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("#"));
     return NextResponse.json({ prompts: lines });
   } catch (error) {
     return NextResponse.json({ error: "Failed to load prompts" }, { status: 500 });

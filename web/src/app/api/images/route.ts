@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { promises as fs } from "node:fs";
-import path from "node:path";
 
-export async function GET() {
+export const runtime = "edge";
+
+export async function GET(request: Request) {
   try {
-    const dir = path.join(process.cwd(), "public", "images");
-    const files = await fs.readdir(dir);
-    const images = files
-      .filter((f) => /\.(png|jpg|jpeg|gif|webp|avif|svg)$/i.test(f))
-      .map((f) => `/images/${f}`);
+    const url = new URL("/data/images.json", request.url).toString();
+    const res = await fetch(url, { cache: "force-cache" });
+    if (!res.ok) throw new Error("Failed to load images manifest");
+    const data = await res.json();
+    const images: string[] = Array.isArray(data) ? data : Array.isArray(data.images) ? data.images : [];
     return NextResponse.json({ images });
   } catch (error) {
     return NextResponse.json({ error: "Failed to list images" }, { status: 500 });
